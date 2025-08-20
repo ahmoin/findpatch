@@ -42,7 +42,10 @@ export default function SignIn() {
 						<CardHeader className="text-center">
 							<CardTitle className="text-xl">Welcome back</CardTitle>
 							{/* TODO: add other OAuth providers like GitHub */}
-							<CardDescription>{flow === "signIn" ? "Login" : "Sign up"} with your Google account</CardDescription>
+							<CardDescription>
+								{flow === "signIn" ? "Login" : "Sign up"} with your Google
+								account
+							</CardDescription>
 						</CardHeader>
 						<CardContent>
 							<div className="grid gap-6">
