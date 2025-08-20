@@ -58,6 +58,18 @@ export function MapView({ startingPosition }: MapProps) {
 			zoom: 14,
 		});
 
+		const dotElement = document.createElement("div");
+		dotElement.style.width = "12px";
+		dotElement.style.height = "12px";
+		dotElement.style.backgroundColor = "oklch(0.55 0.22 263)";
+		dotElement.style.borderRadius = "50%";
+		dotElement.style.border = "2px solid white";
+		dotElement.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
+
+		new maplibregl.Marker({ element: dotElement })
+			.setLngLat([startingPosition.longitude, startingPosition.latitude])
+			.addTo(map.current);
+
 		return () => {
 			if (map.current) {
 				map.current.remove();
