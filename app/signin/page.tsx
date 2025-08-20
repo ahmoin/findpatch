@@ -26,23 +26,23 @@ export default function SignIn() {
 		<div className="bg-muted flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
 			<div className="flex w-full max-w-sm flex-col gap-6">
 				<div className="flex items-center gap-2 self-center font-medium">
-					<div className="text-primary-foreground flex size-8 items-center justify-center rounded-md">
+					<div className="text-primary-foreground flex size-12 items-center justify-center rounded-md">
 						<Image
-							className="size-8"
+							className="size-12"
 							src="/findpatch.svg"
 							alt="Findpatch logo"
 							width={48}
 							height={48}
 						/>
 					</div>
-					Findpatch
+					<span className="text-2xl2">Findpatch</span>
 				</div>
 				<div className="flex flex-col gap-6">
 					<Card>
 						<CardHeader className="text-center">
 							<CardTitle className="text-xl">Welcome back</CardTitle>
 							{/* TODO: add other OAuth providers like GitHub */}
-							<CardDescription>Login with your Google account</CardDescription>
+							<CardDescription>{flow === "signIn" ? "Login" : "Sign up"} with your Google account</CardDescription>
 						</CardHeader>
 						<CardContent>
 							<div className="grid gap-6">
@@ -59,7 +59,7 @@ export default function SignIn() {
 												fill="currentColor"
 											/>
 										</svg>
-										Login with Google
+										{flow === "signIn" ? "Login" : "Sign up"} with Google
 									</Button>
 								</div>
 								<div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
