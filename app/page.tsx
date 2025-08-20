@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MapView } from "@/components/map";
 import { SiteHeader } from "@/components/site-header";
 
 export default function Home() {
@@ -38,17 +39,18 @@ export default function Home() {
 			<SiteHeader />
 
 			<main className="flex flex-col h-[calc(100vh-8rem)]">
-				<div className="flex-1 relative overflow-hidden flex items-center justify-center">
-					<div className="text-center">
-						{loading && <p>Getting your location...</p>}
-						{error && <p className="text-red-500">{error}</p>}
-						{coordinates && (
-							<div>
-								<h2 className="text-2xl font-bold mb-4">Your Coordinates</h2>
-								{coordinates.latitude}, {coordinates.longitude}
-							</div>
-						)}
-					</div>
+				<div className="flex-1 relative overflow-hidden">
+					{loading && (
+						<div className="flex items-center justify-center h-full">
+							<p>Getting your location...</p>
+						</div>
+					)}
+					{error && (
+						<div className="flex items-center justify-center h-full">
+							<p className="text-red-500">{error}</p>
+						</div>
+					)}
+					{coordinates && <MapView startingPosition={coordinates} />}
 				</div>
 			</main>
 		</div>
