@@ -38,7 +38,7 @@ export default function Home() {
 		<div className="min-h-screen bg-background">
 			<SiteHeader />
 
-			<main className="flex flex-col h-[calc(100vh-5rem)] no-scrollbar">
+			<main className="flex flex-col h-screen">
 				<div className="flex-1 relative overflow-hidden">
 					{loading && (
 						<div className="flex items-center justify-center h-full">

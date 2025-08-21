@@ -148,7 +148,7 @@
 		@apply bg-selection text-selection-foreground;
 	}
 	html {
-		@apply scroll-smooth;
+		@apply no-scrollbar;
 	}
 	body {
 		font-synthesis-weight: none;
