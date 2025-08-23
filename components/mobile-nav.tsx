@@ -1,5 +1,6 @@
 "use client";
 
+import { Map } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	Drawer,
@@ -40,7 +41,18 @@ export function MobileNav() {
 			</DrawerTrigger>
 			<DrawerContent className="max-h-[80svh] p-0">
 				<div className="overflow-auto p-6">
-					<div className="flex flex-col space-y-3">nav items here</div>
+					<div className="flex flex-col space-y-3">
+						<div className="flex flex-col items-center space-y-2">
+							<Button
+								variant="ghost"
+								size="icon"
+								className="size-12 flex flex-col"
+							>
+								<Map className="size-6 -mb-2" />
+								<span className="text-xs text-muted-foreground">Map</span>
+							</Button>
+						</div>
+					</div>
 				</div>
 			</DrawerContent>
 		</Drawer>
