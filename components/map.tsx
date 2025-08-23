@@ -48,41 +48,53 @@ export function MapView({ startingPosition }: MapProps) {
 	});
 	const markersRef = useRef<maplibregl.Marker[]>([]);
 
-	const legalCache = useQuery(api.myFunctions.getCachedResources, {
+	const baseRadius = 0.01;
+	const radius = baseRadius * 2 ** (14 - currentLocation.zoom);
+	const radiusKm = radius * 111;
+
+	const legalCache = useQuery(api.myFunctions.getResourcesInArea, {
 		lat: currentLocation.lat,
 		lon: currentLocation.lon,
-		zoom: currentLocation.zoom,
+		radiusKm: radiusKm,
 		resourceType: "legal",
 	});
-	const shelterCache = useQuery(api.myFunctions.getCachedResources, {
+	const shelterCache = useQuery(api.myFunctions.getResourcesInArea, {
 		lat: currentLocation.lat,
 		lon: currentLocation.lon,
-		zoom: currentLocation.zoom,
+		radiusKm: radiusKm,
 		resourceType: "shelter",
 	});
-	const healthcareCache = useQuery(api.myFunctions.getCachedResources, {
+	const healthcareCache = useQuery(api.myFunctions.getResourcesInArea, {
 		lat: currentLocation.lat,
 		lon: currentLocation.lon,
-		zoom: currentLocation.zoom,
+		radiusKm: radiusKm,
 		resourceType: "healthcare",
 	});
-	const foodCache = useQuery(api.myFunctions.getCachedResources, {
+	const foodCache = useQuery(api.myFunctions.getResourcesInArea, {
 		lat: currentLocation.lat,
 		lon: currentLocation.lon,
-		zoom: currentLocation.zoom,
+		radiusKm: radiusKm,
 		resourceType: "food",
 	});
 
 	const getCacheForResourceType = (resourceType: string) => {
 		switch (resourceType) {
 			case "legal":
-				return legalCache;
+				return legalCache
+					? { resources: legalCache, fromCache: true, cacheAge: 0 }
+					: null;
 			case "shelter":
-				return shelterCache;
+				return shelterCache
+					? { resources: shelterCache, fromCache: true, cacheAge: 0 }
+					: null;
 			case "healthcare":
-				return healthcareCache;
+				return healthcareCache
+					? { resources: healthcareCache, fromCache: true, cacheAge: 0 }
+					: null;
 			case "food":
-				return foodCache;
+				return foodCache
+					? { resources: foodCache, fromCache: true, cacheAge: 0 }
+					: null;
 			default:
 				return null;
 		}
@@ -233,38 +245,38 @@ export function MapView({ startingPosition }: MapProps) {
 	useEffect(() => {
 		const cachedResources: Resource[] = [];
 
-		if (legalCache?.resources) {
-			cachedResources.push(...legalCache.resources);
+		if (legalCache && legalCache.length > 0) {
+			cachedResources.push(...legalCache);
 			setCacheStatus((prev) => ({
 				...prev,
-				legal: { fromCache: true, cacheAge: legalCache.cacheAge },
+				legal: { fromCache: true, cacheAge: 0 },
 			}));
 		}
-		if (shelterCache?.resources) {
-			cachedResources.push(...shelterCache.resources);
+		if (shelterCache && shelterCache.length > 0) {
+			cachedResources.push(...shelterCache);
 			setCacheStatus((prev) => ({
 				...prev,
-				shelter: { fromCache: true, cacheAge: shelterCache.cacheAge },
+				shelter: { fromCache: true, cacheAge: 0 },
 			}));
 		}
-		if (healthcareCache?.resources) {
-			cachedResources.push(...healthcareCache.resources);
+		if (healthcareCache && healthcareCache.length > 0) {
+			cachedResources.push(...healthcareCache);
 			setCacheStatus((prev) => ({
 				...prev,
-				healthcare: { fromCache: true, cacheAge: healthcareCache.cacheAge },
+				healthcare: { fromCache: true, cacheAge: 0 },
 			}));
 		}
-		if (foodCache?.resources) {
-			cachedResources.push(...foodCache.resources);
+		if (foodCache && foodCache.length > 0) {
+			cachedResources.push(...foodCache);
 			setCacheStatus((prev) => ({
 				...prev,
-				food: { fromCache: true, cacheAge: foodCache.cacheAge },
+				food: { fromCache: true, cacheAge: 0 },
 			}));
 		}
 
 		if (cachedResources.length > 0) {
 			console.log(
-				`Instantly loaded ${cachedResources.length} cached resources`,
+				`Instantly loaded ${cachedResources.length} cached resources from new system`,
 			);
 			setResources(cachedResources);
 		}
@@ -436,7 +448,7 @@ export function MapView({ startingPosition }: MapProps) {
 					const cachedData = getCacheForResourceType(type);
 					const hasCache = cachedData?.resources;
 					const verifiedCount = hasCache
-						? cachedData.resources.filter((r) => r.verified).length
+						? cachedData.resources.filter((r: Resource) => r.verified).length
 						: 0;
 					const totalCount = hasCache ? cachedData.resources.length : 0;
 
