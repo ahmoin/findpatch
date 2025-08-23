@@ -28,7 +28,135 @@ interface OverpassElement {
 	};
 }
 
+interface GooglePlaceResult {
+	name: string;
+	geometry: {
+		location: {
+			lat: number;
+			lng: number;
+		};
+	};
+	formatted_address?: string;
+	vicinity?: string;
+	rating?: number;
+	user_ratings_total?: number;
+	formatted_phone_number?: string;
+	website?: string;
+	opening_hours?: {
+		open_now?: boolean;
+		weekday_text?: string[];
+	};
+}
+
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL || "");
+
+function convertGooglePlaceToResource(
+	place: GooglePlaceResult,
+	resourceType: string,
+) {
+	let color = "#666666";
+	let icon = "📍";
+
+	switch (resourceType) {
+		case "legal":
+			color = "#8b5cf6";
+			icon = "⚖️";
+			break;
+		case "shelter":
+			color = "#3b82f6";
+			icon = "🏠";
+			break;
+		case "healthcare":
+			color = "#ef4444";
+			icon = "🏥";
+			break;
+		case "food":
+			color = "#22c55e";
+			icon = "🍽️";
+			break;
+	}
+
+	let confidence = 0.7;
+	if (place.rating && place.rating > 4) confidence += 0.1;
+	if (place.user_ratings_total && place.user_ratings_total > 10)
+		confidence += 0.1;
+	if (place.opening_hours?.open_now !== undefined) confidence += 0.05;
+	if (place.formatted_phone_number) confidence += 0.05;
+
+	return {
+		type: resourceType,
+		name: place.name,
+		color,
+		icon,
+		lat: place.geometry.location.lat,
+		lon: place.geometry.location.lng,
+		address: place.formatted_address || place.vicinity,
+		verified: true,
+		confidence: Math.min(confidence, 1.0),
+		osmTags: {
+			phone: place.formatted_phone_number,
+			website: place.website,
+			opening_hours: place.opening_hours?.weekday_text?.join("; "),
+		},
+	};
+}
+
+async function searchGooglePlaces(
+	lat: number,
+	lon: number,
+	resourceType: string,
+	radius: number,
+) {
+	const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+	if (!apiKey) {
+		console.log("Google Places API key not found, skipping Google search");
+		return [];
+	}
+
+	let searchQuery = "";
+	switch (resourceType) {
+		case "legal":
+			searchQuery = "lawyer OR attorney OR legal aid OR courthouse";
+			break;
+		case "shelter":
+			searchQuery =
+				"homeless shelter OR emergency shelter OR transitional housing";
+			break;
+		case "healthcare":
+			searchQuery =
+				"hospital OR clinic OR pharmacy OR urgent care OR community health";
+			break;
+		case "food":
+			searchQuery =
+				"food bank OR soup kitchen OR food pantry OR community kitchen";
+			break;
+		default:
+			return [];
+	}
+
+	try {
+		const response = await axios.get(
+			`https://maps.googleapis.com/maps/api/place/textsearch/json`,
+			{
+				params: {
+					query: searchQuery,
+					location: `${lat},${lon}`,
+					radius: Math.min(radius * 111000, 50000),
+					key: apiKey,
+				},
+				timeout: 10000,
+			},
+		);
+
+		console.log(
+			`Google Places returned ${response.data.results?.length || 0} results for ${resourceType}`,
+		);
+		return response.data.results || [];
+	} catch (error) {
+		console.log(`Google Places API error for ${resourceType}:`, error);
+		return [];
+	}
+}
 
 export async function POST(request: NextRequest) {
 	try {
@@ -64,6 +192,41 @@ export async function POST(request: NextRequest) {
 
 		const baseRadius = 0.005;
 		const radius = baseRadius * 2 ** (14 - zoom);
+
+		const googleResults = await searchGooglePlaces(
+			lat,
+			lon,
+			resourceType,
+			radius,
+		);
+
+		if (googleResults.length > 0) {
+			const resources = googleResults.map((place: GooglePlaceResult) =>
+				convertGooglePlaceToResource(place, resourceType),
+			);
+
+			await convex.mutation(api.myFunctions.cacheResources, {
+				lat,
+				lon,
+				zoom,
+				resourceType,
+				resources,
+			});
+
+			console.log(
+				`Cached ${resources.length} ${resourceType} resources from Google Places`,
+			);
+
+			return NextResponse.json({
+				resources,
+				fromCache: false,
+				cached: true,
+			});
+		}
+
+		console.log(
+			`Google Places returned no results, falling back to OpenStreetMap for ${resourceType}`,
+		);
 		let query = "";
 
 		switch (resourceType) {
@@ -83,10 +246,26 @@ export async function POST(request: NextRequest) {
         `;
 				break;
 			case "shelter":
-				query = `node["amenity"~"^(shelter|social_facility)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
+				query = `
+					(
+						node["amenity"="shelter"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						node["amenity"="social_facility"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						way["amenity"="shelter"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						way["amenity"="social_facility"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+					);
+				`;
 				break;
 			case "healthcare":
-				query = `node["amenity"~"^(hospital|clinic|doctors|pharmacy)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
+				query = `
+					(
+						node["amenity"="hospital"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						node["amenity"="clinic"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						node["amenity"="doctors"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						node["amenity"="pharmacy"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						way["amenity"="hospital"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						way["amenity"="clinic"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+					);
+				`;
 				break;
 			case "food":
 				query = `
@@ -111,6 +290,8 @@ export async function POST(request: NextRequest) {
 
 		const overpassQuery = `[out:json][timeout:30];(${query});out center tags;`;
 
+		console.log(`Overpass query for ${resourceType}:`, overpassQuery);
+
 		const response = await axios.post(
 			"https://overpass-api.de/api/interpreter",
 			overpassQuery,
@@ -122,9 +303,15 @@ export async function POST(request: NextRequest) {
 			},
 		);
 
+		console.log(
+			`Overpass API returned ${response.data.elements?.length || 0} elements for ${resourceType}`,
+		);
+
 		const validatedResources = await Promise.all(
 			response.data.elements.map(async (element: OverpassElement) => {
-				console.log(`Processing element:`, JSON.stringify(element, null, 2));
+				console.log(
+					`Processing element: ${element.tags.name || "Unnamed"} (${element.type})`,
+				);
 
 				let elementLat: number, elementLon: number;
 
@@ -242,7 +429,7 @@ export async function POST(request: NextRequest) {
 					`Element coordinates: lat=${elementLat}, lon=${elementLon}`,
 				);
 
-				if (confidence < 0.15) {
+				if (confidence < 0.05) {
 					console.log(
 						`Skipping very low-confidence resource: ${element.tags.name || "Unknown"} (confidence: ${confidence})`,
 					);
