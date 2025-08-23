@@ -1,6 +1,6 @@
 "use client";
 
-import { Map } from "lucide-react";
+import { MapIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	Drawer,
@@ -48,7 +48,7 @@ export function MobileNav() {
 								size="icon"
 								className="size-12 flex flex-col"
 							>
-								<Map className="size-6 -mb-2" />
+								<MapIcon className="size-6 -mb-2" />
 								<span className="text-xs text-muted-foreground">Map</span>
 							</Button>
 						</div>
