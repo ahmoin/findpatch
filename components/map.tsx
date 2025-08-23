@@ -25,20 +25,59 @@ export function MapView({ startingPosition }: MapProps) {
 	const mapContainer = useRef<HTMLDivElement>(null);
 	const map = useRef<maplibregl.Map | null>(null);
 	const [resources, setResources] = useState<Resource[]>([]);
+	const markersRef = useRef<maplibregl.Marker[]>([]);
 
-	const fetchNearbyResources = async (lat: number, lon: number) => {
+	const fetchResourceLayer = async (
+		lat: number,
+		lon: number,
+		zoom: number,
+		resourceType: string,
+		retryCount = 0,
+	): Promise<Resource[]> => {
 		try {
-			const radius = 0.01;
-			const overpassQuery = `
-				[out:json][timeout:25];
-				(
-					node["amenity"~"^(food_bank|soup_kitchen|restaurant|fast_food)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-					node["amenity"~"^(hospital|clinic|doctors|pharmacy)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-					node["amenity"~"^(shelter|social_facility)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-					node["office"="lawyer"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-				);
-				out;
-			`;
+			const baseRadius = 0.005;
+			const radius = baseRadius * Math.pow(2, 14 - zoom);
+			let query = "";
+
+			switch (resourceType) {
+				case "legal":
+					query = `
+						(
+							node["office"="lawyer"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["office"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="courthouse"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["office"="notary"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="legal_aid"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["office"="solicitor"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["office"="barrister"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="public_building"]["public_building"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["shop"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						);
+					`;
+					break;
+				case "shelter":
+					query = `node["amenity"~"^(shelter|social_facility)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
+					break;
+				case "healthcare":
+					query = `node["amenity"~"^(hospital|clinic|doctors|pharmacy)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
+					break;
+				case "food":
+					query = `
+						(
+							node["amenity"="food_bank"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="soup_kitchen"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="community_centre"]["community_centre:for"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["social_facility"="food_bank"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["social_facility"="soup_kitchen"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="restaurant"]["cuisine"="free"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["shop"="charity"]["shop"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+							node["amenity"="social_facility"]["social_facility:for"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
+						);
+					`;
+					break;
+			}
+
+			const overpassQuery = `[out:json][timeout:30];(${query});out;`;
 
 			const response = await axios.post(
 				"https://overpass-api.de/api/interpreter",
@@ -47,69 +86,120 @@ export function MapView({ startingPosition }: MapProps) {
 					headers: {
 						"Content-Type": "text/plain",
 					},
+					timeout: 30000,
 				},
 			);
 
-			const resourcesData: Resource[] = response.data.elements.map(
-				(element: any) => {
-					let type = "other";
-					let color = "#666666";
-					let icon = "📍";
+			return response.data.elements.map((element: any) => {
+				let type = resourceType;
+				let color = "#666666";
+				let icon = "📍";
 
-					if (element.tags.amenity) {
-						if (
-							["food_bank", "soup_kitchen", "restaurant", "fast_food"].includes(
-								element.tags.amenity,
-							)
-						) {
-							type = "food";
-							color = "#22c55e";
-							icon = "🍽️";
-						} else if (
-							["hospital", "clinic", "doctors", "pharmacy"].includes(
-								element.tags.amenity,
-							)
-						) {
-							type = "healthcare";
-							color = "#ef4444";
-							icon = "🏥";
-						} else if (
-							["shelter", "social_facility"].includes(element.tags.amenity)
-						) {
-							type = "shelter";
-							color = "#3b82f6";
-							icon = "🏠";
-						}
-					} else if (element.tags.office === "lawyer") {
-						type = "legal";
+				switch (resourceType) {
+					case "legal":
 						color = "#8b5cf6";
 						icon = "⚖️";
-					}
+						break;
+					case "shelter":
+						color = "#3b82f6";
+						icon = "🏠";
+						break;
+					case "healthcare":
+						color = "#ef4444";
+						icon = "🏥";
+						break;
+					case "food":
+						color = "#22c55e";
+						icon = "🍽️";
+						break;
+				}
 
-					return {
-						type,
-						name:
-							element.tags.name ||
-							`${type.charAt(0).toUpperCase() + type.slice(1)} Service`,
-						color,
-						icon,
-						lat: element.lat,
-						lon: element.lon,
-					};
-				},
+				return {
+					type,
+					name:
+						element.tags.name ||
+						`${type.charAt(0).toUpperCase() + type.slice(1)} Service`,
+					color,
+					icon,
+					lat: element.lat,
+					lon: element.lon,
+				};
+			});
+		} catch (error: any) {
+			console.error(`Error fetching ${resourceType} resources:`, error);
+
+			if (error.response?.status === 429 || error.code === "ECONNABORTED") {
+				const maxRetries = 3;
+				if (retryCount < maxRetries) {
+					const delay = 2 ** retryCount * 1000;
+					console.log(
+						`Rate limited for ${resourceType}, retrying in ${delay}ms...`,
+					);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+					return fetchResourceLayer(
+						lat,
+						lon,
+						zoom,
+						resourceType,
+						retryCount + 1,
+					);
+				}
+			}
+
+			return [];
+		}
+	};
+
+	const clearMarkers = () => {
+		markersRef.current.forEach((marker) => marker.remove());
+		markersRef.current = [];
+	};
+
+	const fetchNearbyResources = async (
+		lat: number,
+		lon: number,
+		zoom: number,
+	) => {
+		clearMarkers();
+		setResources([]);
+
+		const resourceTypes = ["legal", "shelter", "healthcare", "food"];
+		let allResources: Resource[] = [];
+
+		console.log(
+			`Fetching resources for center: ${lat.toFixed(4)}, ${lon.toFixed(4)} at zoom ${zoom}`,
+		);
+
+		for (const resourceType of resourceTypes) {
+			console.log(`Loading ${resourceType} resources...`);
+			const layerResources = await fetchResourceLayer(
+				lat,
+				lon,
+				zoom,
+				resourceType,
 			);
+			allResources = [...allResources, ...layerResources];
 
-			setResources(resourcesData.slice(0, 20));
-		} catch (error) {
-			console.error("Error fetching resources:", error);
+			setResources([...allResources]);
+
+			if (layerResources.length > 3) {
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			} else {
+				console.log(
+					`Only ${layerResources.length} ${resourceType} resources found, moving to next layer immediately`,
+				);
+			}
+		}
+
+		if (allResources.length === 0) {
 			setResources([
 				{
-					type: "food",
-					name: "Food Bank",
-					color: "#22c55e",
-					icon: "🍽️",
-					lat: lat + 0.002,
-					lon: lon + 0.001,
+					type: "legal",
+					name: "Legal Aid Office",
+					color: "#8b5cf6",
+					icon: "⚖️",
+					lat: lat - 0.002,
+					lon: lon - 0.001,
 				},
 				{
 					type: "shelter",
@@ -128,12 +218,12 @@ export function MapView({ startingPosition }: MapProps) {
 					lon: lon - 0.002,
 				},
 				{
-					type: "legal",
-					name: "Legal Aid Office",
-					color: "#8b5cf6",
-					icon: "⚖️",
-					lat: lat - 0.002,
-					lon: lon - 0.001,
+					type: "food",
+					name: "Food Bank",
+					color: "#22c55e",
+					icon: "🍽️",
+					lat: lat + 0.002,
+					lon: lon + 0.001,
 				},
 			]);
 		}
@@ -196,7 +286,30 @@ export function MapView({ startingPosition }: MapProps) {
 			.setLngLat([startingPosition.longitude, startingPosition.latitude])
 			.addTo(map.current);
 
-		fetchNearbyResources(startingPosition.latitude, startingPosition.longitude);
+		const initialZoom = map.current.getZoom();
+		fetchNearbyResources(
+			startingPosition.latitude,
+			startingPosition.longitude,
+			initialZoom,
+		);
+
+		let updateTimeout: NodeJS.Timeout;
+
+		const handleMapUpdate = () => {
+			if (!map.current) return;
+
+			clearTimeout(updateTimeout);
+			updateTimeout = setTimeout(() => {
+				if (!map.current) return;
+
+				const center = map.current.getCenter();
+				const zoom = map.current.getZoom();
+				fetchNearbyResources(center.lat, center.lng, zoom);
+			}, 1000);
+		};
+
+		map.current.on("moveend", handleMapUpdate);
+		map.current.on("zoomend", handleMapUpdate);
 
 		return () => {
 			if (map.current) {
@@ -218,7 +331,6 @@ export function MapView({ startingPosition }: MapProps) {
 			resourceElement.style.backgroundColor = resource.color;
 			resourceElement.style.borderRadius = "50%";
 			resourceElement.style.border = "2px solid white";
-			resourceElement.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
 			resourceElement.style.display = "flex";
 			resourceElement.style.alignItems = "center";
 			resourceElement.style.justifyContent = "center";
