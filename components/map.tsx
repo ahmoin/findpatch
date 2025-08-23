@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl from "maplibre-gl";
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
 
 interface MapProps {
 	startingPosition: {
@@ -19,13 +21,72 @@ interface Resource {
 	icon: string;
 	lat: number;
 	lon: number;
+	address?: string;
+	verified?: boolean;
+	confidence?: number;
+	osmTags?: {
+		phone?: string;
+		website?: string;
+		opening_hours?: string;
+		addr_street?: string;
+		addr_city?: string;
+		addr_postcode?: string;
+	};
 }
 
 export function MapView({ startingPosition }: MapProps) {
 	const mapContainer = useRef<HTMLDivElement>(null);
 	const map = useRef<maplibregl.Map | null>(null);
 	const [resources, setResources] = useState<Resource[]>([]);
+	const [cacheStatus, setCacheStatus] = useState<{
+		[key: string]: { fromCache: boolean; cacheAge?: number };
+	}>({});
+	const [currentLocation, setCurrentLocation] = useState({
+		lat: startingPosition.latitude,
+		lon: startingPosition.longitude,
+		zoom: 14,
+	});
 	const markersRef = useRef<maplibregl.Marker[]>([]);
+
+	const legalCache = useQuery(api.myFunctions.getCachedResources, {
+		lat: currentLocation.lat,
+		lon: currentLocation.lon,
+		zoom: currentLocation.zoom,
+		resourceType: "legal",
+	});
+	const shelterCache = useQuery(api.myFunctions.getCachedResources, {
+		lat: currentLocation.lat,
+		lon: currentLocation.lon,
+		zoom: currentLocation.zoom,
+		resourceType: "shelter",
+	});
+	const healthcareCache = useQuery(api.myFunctions.getCachedResources, {
+		lat: currentLocation.lat,
+		lon: currentLocation.lon,
+		zoom: currentLocation.zoom,
+		resourceType: "healthcare",
+	});
+	const foodCache = useQuery(api.myFunctions.getCachedResources, {
+		lat: currentLocation.lat,
+		lon: currentLocation.lon,
+		zoom: currentLocation.zoom,
+		resourceType: "food",
+	});
+
+	const getCacheForResourceType = (resourceType: string) => {
+		switch (resourceType) {
+			case "legal":
+				return legalCache;
+			case "shelter":
+				return shelterCache;
+			case "healthcare":
+				return healthcareCache;
+			case "food":
+				return foodCache;
+			default:
+				return null;
+		}
+	};
 
 	const fetchResourceLayer = async (
 		lat: number,
@@ -35,100 +96,44 @@ export function MapView({ startingPosition }: MapProps) {
 		retryCount = 0,
 	): Promise<Resource[]> => {
 		try {
-			const baseRadius = 0.005;
-			const radius = baseRadius * Math.pow(2, 14 - zoom);
-			let query = "";
+			const cachedData = getCacheForResourceType(resourceType);
+			if (cachedData && cachedData.resources) {
+				console.log(
+					`Loaded ${resourceType} from Convex cache instantly (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
+				);
 
-			switch (resourceType) {
-				case "legal":
-					query = `
-						(
-							node["office"="lawyer"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["office"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="courthouse"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["office"="notary"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="legal_aid"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["office"="solicitor"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["office"="barrister"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="public_building"]["public_building"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["shop"="legal"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-						);
-					`;
-					break;
-				case "shelter":
-					query = `node["amenity"~"^(shelter|social_facility)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
-					break;
-				case "healthcare":
-					query = `node["amenity"~"^(hospital|clinic|doctors|pharmacy)$"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});`;
-					break;
-				case "food":
-					query = `
-						(
-							node["amenity"="food_bank"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="soup_kitchen"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="community_centre"]["community_centre:for"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["social_facility"="food_bank"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["social_facility"="soup_kitchen"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="restaurant"]["cuisine"="free"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["shop"="charity"]["shop"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-							node["amenity"="social_facility"]["social_facility:for"~"food"](${lat - radius},${lon - radius},${lat + radius},${lon + radius});
-						);
-					`;
-					break;
+				setCacheStatus((prev) => ({
+					...prev,
+					[resourceType]: {
+						fromCache: true,
+						cacheAge: cachedData.cacheAge,
+					},
+				}));
+
+				return cachedData.resources;
 			}
 
-			const overpassQuery = `[out:json][timeout:30];(${query});out;`;
-
-			const response = await axios.post(
-				"https://overpass-api.de/api/interpreter",
-				overpassQuery,
-				{
-					headers: {
-						"Content-Type": "text/plain",
-					},
-					timeout: 30000,
-				},
-			);
-
-			return response.data.elements.map((element: any) => {
-				let type = resourceType;
-				let color = "#666666";
-				let icon = "📍";
-
-				switch (resourceType) {
-					case "legal":
-						color = "#8b5cf6";
-						icon = "⚖️";
-						break;
-					case "shelter":
-						color = "#3b82f6";
-						icon = "🏠";
-						break;
-					case "healthcare":
-						color = "#ef4444";
-						icon = "🏥";
-						break;
-					case "food":
-						color = "#22c55e";
-						icon = "🍽️";
-						break;
-				}
-
-				return {
-					type,
-					name:
-						element.tags.name ||
-						`${type.charAt(0).toUpperCase() + type.slice(1)} Service`,
-					color,
-					icon,
-					lat: element.lat,
-					lon: element.lon,
-				};
+			console.log(`No cache for ${resourceType}, fetching fresh data...`);
+			const response = await axios.post("/api/resources", {
+				lat,
+				lon,
+				zoom,
+				resourceType,
 			});
+
+			setCacheStatus((prev) => ({
+				...prev,
+				[resourceType]: {
+					fromCache: false,
+					cacheAge: 0,
+				},
+			}));
+
+			return response.data.resources;
 		} catch (error: any) {
 			console.error(`Error fetching ${resourceType} resources:`, error);
 
-			if (error.response?.status === 429 || error.code === "ECONNABORTED") {
+			if (error.response?.status === 429) {
 				const maxRetries = 3;
 				if (retryCount < maxRetries) {
 					const delay = 2 ** retryCount * 1000;
@@ -161,7 +166,6 @@ export function MapView({ startingPosition }: MapProps) {
 		zoom: number,
 	) => {
 		clearMarkers();
-		setResources([]);
 
 		const resourceTypes = ["legal", "shelter", "healthcare", "food"];
 		let allResources: Resource[] = [];
@@ -170,8 +174,32 @@ export function MapView({ startingPosition }: MapProps) {
 			`Fetching resources for center: ${lat.toFixed(4)}, ${lon.toFixed(4)} at zoom ${zoom}`,
 		);
 
+		const cachedResources: Resource[] = [];
+		const typesToFetch: string[] = [];
+
 		for (const resourceType of resourceTypes) {
-			console.log(`Loading ${resourceType} resources...`);
+			const cachedData = getCacheForResourceType(resourceType);
+			if (cachedData?.resources) {
+				console.log(
+					`Using cached ${resourceType} resources (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
+				);
+				cachedResources.push(...cachedData.resources);
+				setCacheStatus((prev) => ({
+					...prev,
+					[resourceType]: { fromCache: true, cacheAge: cachedData.cacheAge },
+				}));
+			} else {
+				typesToFetch.push(resourceType);
+			}
+		}
+
+		if (cachedResources.length > 0) {
+			allResources = [...cachedResources];
+			setResources([...allResources]);
+		}
+
+		for (const resourceType of typesToFetch) {
+			console.log(`Loading fresh ${resourceType} resources...`);
 			const layerResources = await fetchResourceLayer(
 				lat,
 				lon,
@@ -192,42 +220,49 @@ export function MapView({ startingPosition }: MapProps) {
 		}
 
 		if (allResources.length === 0) {
-			setResources([
-				{
-					type: "legal",
-					name: "Legal Aid Office",
-					color: "#8b5cf6",
-					icon: "⚖️",
-					lat: lat - 0.002,
-					lon: lon - 0.001,
-				},
-				{
-					type: "shelter",
-					name: "Emergency Shelter",
-					color: "#3b82f6",
-					icon: "🏠",
-					lat: lat - 0.001,
-					lon: lon + 0.002,
-				},
-				{
-					type: "healthcare",
-					name: "Community Health Center",
-					color: "#ef4444",
-					icon: "🏥",
-					lat: lat + 0.001,
-					lon: lon - 0.002,
-				},
-				{
-					type: "food",
-					name: "Food Bank",
-					color: "#22c55e",
-					icon: "🍽️",
-					lat: lat + 0.002,
-					lon: lon + 0.001,
-				},
-			]);
+			setResources([]);
 		}
 	};
+
+	useEffect(() => {
+		const cachedResources: Resource[] = [];
+
+		if (legalCache?.resources) {
+			cachedResources.push(...legalCache.resources);
+			setCacheStatus((prev) => ({
+				...prev,
+				legal: { fromCache: true, cacheAge: legalCache.cacheAge },
+			}));
+		}
+		if (shelterCache?.resources) {
+			cachedResources.push(...shelterCache.resources);
+			setCacheStatus((prev) => ({
+				...prev,
+				shelter: { fromCache: true, cacheAge: shelterCache.cacheAge },
+			}));
+		}
+		if (healthcareCache?.resources) {
+			cachedResources.push(...healthcareCache.resources);
+			setCacheStatus((prev) => ({
+				...prev,
+				healthcare: { fromCache: true, cacheAge: healthcareCache.cacheAge },
+			}));
+		}
+		if (foodCache?.resources) {
+			cachedResources.push(...foodCache.resources);
+			setCacheStatus((prev) => ({
+				...prev,
+				food: { fromCache: true, cacheAge: foodCache.cacheAge },
+			}));
+		}
+
+		if (cachedResources.length > 0) {
+			console.log(
+				`Instantly loaded ${cachedResources.length} cached resources`,
+			);
+			setResources(cachedResources);
+		}
+	}, [legalCache, shelterCache, healthcareCache, foodCache]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchNearbyResources changes on every re-render and should not be used as a hook dependency.
 	useEffect(() => {
@@ -304,6 +339,9 @@ export function MapView({ startingPosition }: MapProps) {
 
 				const center = map.current.getCenter();
 				const zoom = map.current.getZoom();
+
+				setCurrentLocation({ lat: center.lat, lon: center.lng, zoom });
+
 				fetchNearbyResources(center.lat, center.lng, zoom);
 			}, 1000);
 		};
@@ -325,6 +363,21 @@ export function MapView({ startingPosition }: MapProps) {
 		resources.forEach((resource) => {
 			if (!map.current) return;
 
+			if (
+				!resource.lat ||
+				!resource.lon ||
+				Number.isNaN(resource.lat) ||
+				Number.isNaN(resource.lon)
+			) {
+				console.warn(`Skipping resource with invalid coordinates:`, {
+					name: resource.name,
+					lat: resource.lat,
+					lon: resource.lon,
+					type: resource.type,
+				});
+				return;
+			}
+
 			const resourceElement = document.createElement("div");
 			resourceElement.style.width = "32px";
 			resourceElement.style.height = "32px";
@@ -342,9 +395,19 @@ export function MapView({ startingPosition }: MapProps) {
 				offset: 25,
 				closeButton: false,
 			}).setHTML(
-				`<div style="padding: 6px 8px;">
-					<div style="font-size: 14px; font-weight: bold; margin-bottom: 2px; color: #333;">${resource.name}</div>
-					<div style="color: ${resource.color}; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">${resource.icon} ${resource.type}</div>
+				`<div style="padding: 8px 10px; max-width: 280px;">
+					<div style="font-size: 14px; font-weight: bold; margin-bottom: 4px; color: #333;">
+						${resource.name}
+						${resource.verified ? '<span style="color: #22c55e; margin-left: 4px;">✓</span>' : ""}
+					</div>
+					<div style="color: ${resource.color}; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+						${resource.icon} ${resource.type}
+						${resource.confidence ? `<span style="color: #666; margin-left: 8px;">${Math.round(resource.confidence * 100)}% confidence</span>` : ""}
+					</div>
+					${resource.address ? `<div style="font-size: 11px; color: #666; margin-bottom: 2px;">📍 ${resource.address}</div>` : ""}
+					${resource.osmTags?.phone ? `<div style="font-size: 11px; color: #666; margin-bottom: 2px;">📞 ${resource.osmTags.phone}</div>` : ""}
+					${resource.osmTags?.website ? `<div style="font-size: 11px; color: #666; margin-bottom: 2px;">🌐 <a href="${resource.osmTags.website}" target="_blank" style="color: #3b82f6;">Website</a></div>` : ""}
+					${resource.osmTags?.opening_hours ? `<div style="font-size: 11px; color: #666;">🕒 ${resource.osmTags.opening_hours}</div>` : ""}
 				</div>`,
 			);
 
@@ -355,5 +418,47 @@ export function MapView({ startingPosition }: MapProps) {
 		});
 	}, [resources]);
 
-	return <div ref={mapContainer} className="w-full h-full" />;
+	return (
+		<div className="relative w-full h-full">
+			<div ref={mapContainer} className="w-full h-full" />
+
+			{/* Speed & Verification Status */}
+			<div className="absolute top-4 right-4 bg-black/80 text-white text-xs rounded-lg p-2 max-w-xs">
+				<div className="font-semibold mb-1">⚡ Status</div>
+				{["legal", "shelter", "healthcare", "food"].map((type) => {
+					const status = cacheStatus[type];
+					const cachedData = getCacheForResourceType(type);
+					const hasCache = cachedData?.resources;
+					const verifiedCount = hasCache
+						? cachedData.resources.filter((r) => r.verified).length
+						: 0;
+					const totalCount = hasCache ? cachedData.resources.length : 0;
+
+					return (
+						<div key={type} className="flex items-center gap-2 mb-1">
+							<div
+								className={`w-2 h-2 rounded-full ${
+									hasCache
+										? "bg-green-400"
+										: status
+											? (status.fromCache ? "bg-green-400" : "bg-yellow-400")
+											: "bg-gray-500"
+								}`}
+							/>
+							<span className="capitalize">{type}:</span>
+							<span className="text-gray-300">
+								{hasCache
+									? `${totalCount} found (${verifiedCount} verified)`
+									: status
+										? status.fromCache
+											? `cached (${Math.round((status.cacheAge || 0) / 1000 / 60)}min ago)`
+											: "fresh"
+										: "loading..."}
+							</span>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
 }
