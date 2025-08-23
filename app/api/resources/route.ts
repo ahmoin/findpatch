@@ -1,18 +1,34 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
-import { 
-  reverseGeocode, 
-  validateCoordinates, 
-  extractOSMTags, 
-  calculateResourceConfidence,
-  generateBasicAddress,
-  forwardGeocode,
-  extractAddressFromOSM
+import {
+	reverseGeocode,
+	validateCoordinates,
+	extractOSMTags,
+	calculateResourceConfidence,
+	generateBasicAddress,
+	forwardGeocode,
+	extractAddressFromOSM,
+	type ReverseGeocodeResult,
 } from "../../../lib/address-validation";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+interface OverpassElement {
+	type: "node" | "way" | "relation";
+	id: number;
+	lat?: number;
+	lon?: number;
+	center?: {
+		lat: number;
+		lon: number;
+	};
+	tags: {
+		[key: string]: string | undefined;
+		name?: string;
+	};
+}
+
+const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL || "");
 
 export async function POST(request: NextRequest) {
 	try {
@@ -107,21 +123,33 @@ export async function POST(request: NextRequest) {
 		);
 
 		const validatedResources = await Promise.all(
-			response.data.elements.map(async (element: any) => {
+			response.data.elements.map(async (element: OverpassElement) => {
 				console.log(`Processing element:`, JSON.stringify(element, null, 2));
-				
+
 				let elementLat: number, elementLon: number;
-				
-				if (element.type === 'node') {
+
+				if (element.type === "node") {
+					if (element.lat == null || element.lon == null) {
+						console.log(
+							`Node missing coordinates: lat=${element.lat}, lon=${element.lon}`,
+						);
+						return null;
+					}
 					elementLat = element.lat;
 					elementLon = element.lon;
 					console.log(`Node coordinates: lat=${elementLat}, lon=${elementLon}`);
-				} else if (element.type === 'way' && element.center) {
+				} else if (element.type === "way" && element.center) {
 					elementLat = element.center.lat;
 					elementLon = element.center.lon;
-				} else if (element.type === 'relation' && element.center) {
+					console.log(
+						`Way center coordinates: lat=${elementLat}, lon=${elementLon}`,
+					);
+				} else if (element.type === "relation" && element.center) {
 					elementLat = element.center.lat;
 					elementLon = element.center.lon;
+					console.log(
+						`Relation center coordinates: lat=${elementLat}, lon=${elementLon}`,
+					);
 				} else {
 					const osmAddress = extractAddressFromOSM(element.tags);
 					if (osmAddress) {
@@ -130,19 +158,27 @@ export async function POST(request: NextRequest) {
 						if (coords) {
 							elementLat = coords.lat;
 							elementLon = coords.lon;
-							console.log(`Forward geocoded ${osmAddress} to ${elementLat}, ${elementLon}`);
+							console.log(
+								`Forward geocoded ${osmAddress} to ${elementLat}, ${elementLon}`,
+							);
 						} else {
 							console.log(`Forward geocoding failed for: ${osmAddress}`);
 							return null;
 						}
 					} else {
-						console.log(`Skipping element with no coordinates or address:`, element.type, element.id);
+						console.log(
+							`Skipping element with no coordinates or address:`,
+							element.type,
+							element.id,
+						);
 						return null;
 					}
 				}
 
 				if (!validateCoordinates(elementLat, elementLon)) {
-					console.log(`Skipping resource with invalid coordinates: ${elementLat}, ${elementLon}`);
+					console.log(
+						`Skipping resource with invalid coordinates: ${elementLat}, ${elementLon}`,
+					);
 					return null;
 				}
 
@@ -170,49 +206,80 @@ export async function POST(request: NextRequest) {
 
 				const osmTags = extractOSMTags(element.tags);
 
-                let addressResult: any;
+				let addressResult: ReverseGeocodeResult;
 				try {
-					addressResult = await reverseGeocode(elementLat, elementLon, element.tags);
+					addressResult = await reverseGeocode(
+						elementLat,
+						elementLon,
+						element.tags,
+					);
 				} catch (error) {
-					console.log(`Reverse geocoding failed for ${element.tags.name}, using fallback`);
+					console.log(
+						`Reverse geocoding failed for ${element.tags.name}, using fallback ${error}`,
+					);
 					addressResult = {
-						address: generateBasicAddress(elementLat, elementLon, osmTags, element.tags.name),
+						address: generateBasicAddress(
+							elementLat,
+							elementLon,
+							osmTags,
+							element.tags.name,
+						),
 						confidence: 0.4,
 						verified: false,
 					};
 				}
 
-				const confidence = calculateResourceConfidence(element, addressResult, osmTags);
+				const confidence = calculateResourceConfidence(
+					element,
+					addressResult,
+					osmTags,
+				);
 
-				console.log(`Resource: ${element.tags.name || 'Unknown'} - Address: ${addressResult.address} - Confidence: ${confidence}`);
-				console.log(`Element coordinates: lat=${elementLat}, lon=${elementLon}`);
+				console.log(
+					`Resource: ${element.tags.name || "Unknown"} - Address: ${addressResult.address} - Confidence: ${confidence}`,
+				);
+				console.log(
+					`Element coordinates: lat=${elementLat}, lon=${elementLon}`,
+				);
 
 				if (confidence < 0.15) {
-					console.log(`Skipping very low-confidence resource: ${element.tags.name || 'Unknown'} (confidence: ${confidence})`);
+					console.log(
+						`Skipping very low-confidence resource: ${element.tags.name || "Unknown"} (confidence: ${confidence})`,
+					);
 					return null;
 				}
 
 				const resource = {
 					type: resourceType,
-					name: element.tags.name || `${resourceType.charAt(0).toUpperCase() + resourceType.slice(1)} Service`,
+					name:
+						element.tags.name ||
+						`${resourceType.charAt(0).toUpperCase() + resourceType.slice(1)} Service`,
 					color,
 					icon,
 					lat: Number(elementLat),
-					lon: Number(elementLon), 
+					lon: Number(elementLon),
 					address: addressResult.address,
 					verified: addressResult.verified,
 					confidence,
 					osmTags,
 				};
 
-				console.log(`Created resource object:`, JSON.stringify(resource, null, 2));
+				console.log(
+					`Created resource object:`,
+					JSON.stringify(resource, null, 2),
+				);
 				return resource;
-			})
+			}),
 		);
 
-		const resources = validatedResources.filter(resource => resource !== null);
-		
-		console.log(`Final resources to cache (${resources.length}):`, JSON.stringify(resources, null, 2));
+		const resources = validatedResources.filter(
+			(resource) => resource !== null,
+		);
+
+		console.log(
+			`Final resources to cache (${resources.length}):`,
+			JSON.stringify(resources, null, 2),
+		);
 
 		await convex.mutation(api.myFunctions.cacheResources, {
 			lat,
@@ -231,10 +298,16 @@ export async function POST(request: NextRequest) {
 			fromCache: false,
 			cached: true,
 		});
-	} catch (error: any) {
+	} catch (error: unknown) {
 		console.error("Error fetching resources:", error);
 
-		if (error.response?.status === 429) {
+		const isAxiosError = (
+			err: unknown,
+		): err is { response?: { status: number } } => {
+			return typeof err === "object" && err !== null && "response" in err;
+		};
+
+		if (isAxiosError(error) && error.response?.status === 429) {
 			return NextResponse.json(
 				{ error: "Rate limited by Overpass API" },
 				{ status: 429 },

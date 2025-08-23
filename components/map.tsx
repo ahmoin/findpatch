@@ -97,7 +97,7 @@ export function MapView({ startingPosition }: MapProps) {
 	): Promise<Resource[]> => {
 		try {
 			const cachedData = getCacheForResourceType(resourceType);
-			if (cachedData && cachedData.resources) {
+			if (cachedData?.resources) {
 				console.log(
 					`Loaded ${resourceType} from Convex cache instantly (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
 				);
@@ -130,10 +130,16 @@ export function MapView({ startingPosition }: MapProps) {
 			}));
 
 			return response.data.resources;
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error(`Error fetching ${resourceType} resources:`, error);
 
-			if (error.response?.status === 429) {
+			const isAxiosError = (
+				err: unknown,
+			): err is { response?: { status: number } } => {
+				return typeof err === "object" && err !== null && "response" in err;
+			};
+
+			if (isAxiosError(error) && error.response?.status === 429) {
 				const maxRetries = 3;
 				if (retryCount < maxRetries) {
 					const delay = 2 ** retryCount * 1000;

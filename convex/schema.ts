@@ -17,8 +17,8 @@ export default defineSchema({
 				icon: v.string(),
 				lat: v.number(),
 				lon: v.number(),
-				address: v.optional(v.string()), 
-				verified: v.optional(v.boolean()), 
+				address: v.optional(v.string()),
+				verified: v.optional(v.boolean()),
 				confidence: v.optional(v.number()),
 				osmTags: v.optional(
 					v.object({

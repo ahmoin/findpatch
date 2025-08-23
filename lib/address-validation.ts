@@ -1,6 +1,6 @@
 import axios from "axios";
 
-interface ReverseGeocodeResult {
+export interface ReverseGeocodeResult {
 	address: string;
 	confidence: number;
 	verified: boolean;
@@ -15,7 +15,25 @@ interface OSMTags {
 	addr_postcode?: string;
 }
 
-export function extractAddressFromOSM(tags: any): string | null {
+interface OSMElementTags {
+	[key: string]: string | undefined;
+	name?: string;
+	phone?: string;
+	website?: string;
+	opening_hours?: string;
+	"addr:housenumber"?: string;
+	"addr:street"?: string;
+	"addr:city"?: string;
+	"addr:postcode"?: string;
+	"contact:phone"?: string;
+	"contact:website"?: string;
+}
+
+interface OSMElement {
+	tags: OSMElementTags;
+}
+
+export function extractAddressFromOSM(tags: OSMElementTags): string | null {
 	const parts: string[] = [];
 
 	if (tags["addr:housenumber"]) parts.push(tags["addr:housenumber"]);
@@ -33,7 +51,7 @@ export function extractAddressFromOSM(tags: any): string | null {
 export async function reverseGeocode(
 	lat: number,
 	lon: number,
-	osmTags?: any,
+	osmTags?: OSMElementTags,
 ): Promise<ReverseGeocodeResult> {
 	if (osmTags) {
 		const osmAddress = extractAddressFromOSM(osmTags);
@@ -53,7 +71,7 @@ export async function reverseGeocode(
 				headers: {
 					"User-Agent": "FindPatch/1.0 (Resource Verification)",
 				},
-				timeout: 3000
+				timeout: 3000,
 			},
 		);
 
@@ -102,7 +120,7 @@ export function validateCoordinates(lat: number, lon: number): boolean {
 	return true;
 }
 
-export function extractOSMTags(tags: any): OSMTags {
+export function extractOSMTags(tags: OSMElementTags): OSMTags {
 	return {
 		phone: tags.phone || tags["contact:phone"],
 		website: tags.website || tags["contact:website"],
@@ -140,11 +158,11 @@ export function generateBasicAddress(
 		return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
 	}
 
-  return "Unknown Location";
+	return "Unknown Location";
 }
 
 export function calculateResourceConfidence(
-	element: any,
+	element: OSMElement,
 	addressResult: ReverseGeocodeResult,
 	osmTags: OSMTags,
 ): number {
