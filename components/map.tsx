@@ -1,17 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import axios from "axios";
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl from "maplibre-gl";
 import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
+import { useMapLocation } from "@/hooks/useMapLocation";
 
 interface MapProps {
 	startingPosition: {
 		latitude: number;
 		longitude: number;
 	};
+	deviceLocation?: {
+		latitude: number;
+		longitude: number;
+	} | null;
 }
 
 interface Resource {
@@ -34,19 +39,84 @@ interface Resource {
 	};
 }
 
-export function MapView({ startingPosition }: MapProps) {
+export function MapView({ startingPosition, deviceLocation }: MapProps) {
 	const mapContainer = useRef<HTMLDivElement>(null);
 	const map = useRef<maplibregl.Map | null>(null);
 	const [resources, setResources] = useState<Resource[]>([]);
 	const [cacheStatus, setCacheStatus] = useState<{
 		[key: string]: { fromCache: boolean; cacheAge?: number };
 	}>({});
-	const [currentLocation, setCurrentLocation] = useState({
-		lat: startingPosition.latitude,
-		lon: startingPosition.longitude,
-		zoom: 14,
-	});
 	const markersRef = useRef<maplibregl.Marker[]>([]);
+	const userLocationMarker = useRef<maplibregl.Marker | null>(null);
+
+	const { location: mapLocation, updateLocation } = useMapLocation({
+		latitude: startingPosition.latitude,
+		longitude: startingPosition.longitude,
+		zoom:
+			startingPosition.latitude === 20 && startingPosition.longitude === 0
+				? 2
+				: 14, 
+	});
+
+	const effectiveLocation = mapLocation || {
+		latitude: startingPosition.latitude,
+		longitude: startingPosition.longitude,
+		zoom:
+			startingPosition.latitude === 20 && startingPosition.longitude === 0
+				? 2
+				: 14, 
+	};
+
+	useEffect(() => {
+		if (map.current && startingPosition.latitude !== 20) {
+			console.log("Updating map to new location:", startingPosition);
+			map.current.flyTo({
+				center: [startingPosition.longitude, startingPosition.latitude],
+				zoom: 14,
+				duration: 2000
+			});
+		}
+	}, [startingPosition]);
+
+	useEffect(() => {
+		if (!map.current) return;
+
+		if (deviceLocation) {
+			console.log("Updating device location marker:", deviceLocation);
+
+			if (userLocationMarker.current) {
+				userLocationMarker.current.setLngLat([
+					deviceLocation.longitude,
+					deviceLocation.latitude,
+				]);
+			} else {
+				const dotElement = document.createElement("div");
+				dotElement.style.width = "12px";
+				dotElement.style.height = "12px";
+				dotElement.style.backgroundColor = "oklch(0.55 0.22 263)";
+				dotElement.style.borderRadius = "50%";
+				dotElement.style.border = "2px solid white";
+				dotElement.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
+
+				userLocationMarker.current = new maplibregl.Marker({
+					element: dotElement,
+				})
+					.setLngLat([deviceLocation.longitude, deviceLocation.latitude])
+					.addTo(map.current);
+			}
+		} else {
+			if (userLocationMarker.current) {
+				userLocationMarker.current.remove();
+				userLocationMarker.current = null;
+			}
+		}
+	}, [deviceLocation]);
+
+	const [currentLocation, setCurrentLocation] = useState({
+		lat: effectiveLocation.latitude,
+		lon: effectiveLocation.longitude,
+		zoom: effectiveLocation.zoom,
+	});
 
 	const baseRadius = 0.01;
 	const radius = baseRadius * 2 ** (14 - currentLocation.zoom);
@@ -178,69 +248,69 @@ export function MapView({ startingPosition }: MapProps) {
 		markersRef.current = [];
 	};
 
-	const fetchNearbyResources = async (
-		lat: number,
-		lon: number,
-		zoom: number,
-	) => {
-		clearMarkers();
+	// biome-ignore lint/correctness/useExhaustiveDependencies: some dependencies change on every re-render and should not be used as hook dependencies.
+	const fetchNearbyResources = useCallback(
+		async (lat: number, lon: number, zoom: number) => {
+			clearMarkers();
 
-		const resourceTypes = ["legal", "shelter", "healthcare", "food"];
-		let allResources: Resource[] = [];
+			const resourceTypes = ["legal", "shelter", "healthcare", "food"];
+			let allResources: Resource[] = [];
 
-		console.log(
-			`Fetching resources for center: ${lat.toFixed(4)}, ${lon.toFixed(4)} at zoom ${zoom}`,
-		);
-
-		const cachedResources: Resource[] = [];
-		const typesToFetch: string[] = [];
-
-		for (const resourceType of resourceTypes) {
-			const cachedData = getCacheForResourceType(resourceType);
-			if (cachedData?.resources) {
-				console.log(
-					`Using cached ${resourceType} resources (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
-				);
-				cachedResources.push(...cachedData.resources);
-				setCacheStatus((prev) => ({
-					...prev,
-					[resourceType]: { fromCache: true, cacheAge: cachedData.cacheAge },
-				}));
-			} else {
-				typesToFetch.push(resourceType);
-			}
-		}
-
-		if (cachedResources.length > 0) {
-			allResources = [...cachedResources];
-			setResources([...allResources]);
-		}
-
-		for (const resourceType of typesToFetch) {
-			console.log(`Loading fresh ${resourceType} resources...`);
-			const layerResources = await fetchResourceLayer(
-				lat,
-				lon,
-				zoom,
-				resourceType,
+			console.log(
+				`Fetching resources for center: ${lat.toFixed(4)}, ${lon.toFixed(4)} at zoom ${zoom}`,
 			);
-			allResources = [...allResources, ...layerResources];
 
-			setResources([...allResources]);
+			const cachedResources: Resource[] = [];
+			const typesToFetch: string[] = [];
 
-			if (layerResources.length > 3) {
-				await new Promise((resolve) => setTimeout(resolve, 500));
-			} else {
-				console.log(
-					`Only ${layerResources.length} ${resourceType} resources found, moving to next layer immediately`,
-				);
+			for (const resourceType of resourceTypes) {
+				const cachedData = getCacheForResourceType(resourceType);
+				if (cachedData?.resources) {
+					console.log(
+						`Using cached ${resourceType} resources (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
+					);
+					cachedResources.push(...cachedData.resources);
+					setCacheStatus((prev) => ({
+						...prev,
+						[resourceType]: { fromCache: true, cacheAge: cachedData.cacheAge },
+					}));
+				} else {
+					typesToFetch.push(resourceType);
+				}
 			}
-		}
 
-		if (allResources.length === 0) {
-			setResources([]);
-		}
-	};
+			if (cachedResources.length > 0) {
+				allResources = [...cachedResources];
+				setResources([...allResources]);
+			}
+
+			for (const resourceType of typesToFetch) {
+				console.log(`Loading fresh ${resourceType} resources...`);
+				const layerResources = await fetchResourceLayer(
+					lat,
+					lon,
+					zoom,
+					resourceType,
+				);
+				allResources = [...allResources, ...layerResources];
+
+				setResources([...allResources]);
+
+				if (layerResources.length > 3) {
+					await new Promise((resolve) => setTimeout(resolve, 500));
+				} else {
+					console.log(
+						`Only ${layerResources.length} ${resourceType} resources found, moving to next layer immediately`,
+					);
+				}
+			}
+
+			if (allResources.length === 0) {
+				setResources([]);
+			}
+		},
+		[],
+	);
 
 	useEffect(() => {
 		const cachedResources: Resource[] = [];
@@ -323,26 +393,16 @@ export function MapView({ startingPosition }: MapProps) {
 					},
 				],
 			},
-			center: [startingPosition.longitude, startingPosition.latitude],
-			zoom: 14,
+			center: [effectiveLocation.longitude, effectiveLocation.latitude],
+			zoom: effectiveLocation.zoom,
 		});
 
-		const dotElement = document.createElement("div");
-		dotElement.style.width = "12px";
-		dotElement.style.height = "12px";
-		dotElement.style.backgroundColor = "oklch(0.55 0.22 263)";
-		dotElement.style.borderRadius = "50%";
-		dotElement.style.border = "2px solid white";
-		dotElement.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
-
-		new maplibregl.Marker({ element: dotElement })
-			.setLngLat([startingPosition.longitude, startingPosition.latitude])
-			.addTo(map.current);
+		// Don't create initial user marker here - it will be created by deviceLocation effect
 
 		const initialZoom = map.current.getZoom();
 		fetchNearbyResources(
-			startingPosition.latitude,
-			startingPosition.longitude,
+			effectiveLocation.latitude,
+			effectiveLocation.longitude,
 			initialZoom,
 		);
 
@@ -359,6 +419,11 @@ export function MapView({ startingPosition }: MapProps) {
 				const zoom = map.current.getZoom();
 
 				setCurrentLocation({ lat: center.lat, lon: center.lng, zoom });
+				updateLocation({
+					latitude: center.lat,
+					longitude: center.lng,
+					zoom: zoom,
+				});
 
 				fetchNearbyResources(center.lat, center.lng, zoom);
 			}, 1000);
@@ -373,7 +438,7 @@ export function MapView({ startingPosition }: MapProps) {
 				map.current = null;
 			}
 		};
-	}, [startingPosition]);
+	}, []); // Only initialize once
 
 	useEffect(() => {
 		if (!map.current || resources.length === 0) return;

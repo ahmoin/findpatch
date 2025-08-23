@@ -1,7 +1,6 @@
-import { useQuery, useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 
-// Legacy hooks for backward compatibility
 export function useCachedResources(
 	lat: number,
 	lon: number,
