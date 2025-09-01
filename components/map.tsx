@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import * as maptilersdk from "@maptiler/sdk";
 import axios from "axios";
-import "maplibre-gl/dist/maplibre-gl.css";
-import maplibregl from "maplibre-gl";
+import * as React from "react";
+import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useTheme } from "next-themes";
 import { useMapLocation } from "@/hooks/useMapLocation";
+import { api } from "../convex/_generated/api";
 
 interface MapProps {
 	startingPosition: {
@@ -40,14 +41,15 @@ interface Resource {
 }
 
 export function MapView({ startingPosition, deviceLocation }: MapProps) {
-	const mapContainer = useRef<HTMLDivElement>(null);
-	const map = useRef<maplibregl.Map | null>(null);
-	const [resources, setResources] = useState<Resource[]>([]);
-	const [cacheStatus, setCacheStatus] = useState<{
+	const mapContainer = React.useRef<HTMLDivElement>(null);
+	const map = React.useRef<maptilersdk.Map | null>(null);
+	const [resources, setResources] = React.useState<Resource[]>([]);
+	const [cacheStatus, setCacheStatus] = React.useState<{
 		[key: string]: { fromCache: boolean; cacheAge?: number };
 	}>({});
-	const markersRef = useRef<maplibregl.Marker[]>([]);
-	const userLocationMarker = useRef<maplibregl.Marker | null>(null);
+	const markersRef = React.useRef<maptilersdk.Marker[]>([]);
+	const userLocationMarker = React.useRef<maptilersdk.Marker | null>(null);
+	const { theme: mode } = useTheme();
 
 	const { location: mapLocation, updateLocation } = useMapLocation({
 		latitude: startingPosition.latitude,
@@ -55,7 +57,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		zoom:
 			startingPosition.latitude === 20 && startingPosition.longitude === 0
 				? 2
-				: 14, 
+				: 14,
 	});
 
 	const effectiveLocation = mapLocation || {
@@ -64,21 +66,21 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		zoom:
 			startingPosition.latitude === 20 && startingPosition.longitude === 0
 				? 2
-				: 14, 
+				: 14,
 	};
 
-	useEffect(() => {
+	React.useEffect(() => {
 		if (map.current && startingPosition.latitude !== 20) {
 			console.log("Updating map to new location:", startingPosition);
 			map.current.flyTo({
 				center: [startingPosition.longitude, startingPosition.latitude],
 				zoom: 14,
-				duration: 2000
+				duration: 2000,
 			});
 		}
 	}, [startingPosition]);
 
-	useEffect(() => {
+	React.useEffect(() => {
 		if (!map.current) return;
 
 		if (deviceLocation) {
@@ -98,7 +100,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 				dotElement.style.border = "2px solid white";
 				dotElement.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
 
-				userLocationMarker.current = new maplibregl.Marker({
+				userLocationMarker.current = new maptilersdk.Marker({
 					element: dotElement,
 				})
 					.setLngLat([deviceLocation.longitude, deviceLocation.latitude])
@@ -112,7 +114,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		}
 	}, [deviceLocation]);
 
-	const [currentLocation, setCurrentLocation] = useState({
+	const [currentLocation, setCurrentLocation] = React.useState({
 		lat: effectiveLocation.latitude,
 		lon: effectiveLocation.longitude,
 		zoom: effectiveLocation.zoom,
@@ -249,7 +251,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 	};
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: some dependencies change on every re-render and should not be used as hook dependencies.
-	const fetchNearbyResources = useCallback(
+	const fetchNearbyResources = React.useCallback(
 		async (lat: number, lon: number, zoom: number) => {
 			clearMarkers();
 
@@ -312,7 +314,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		[],
 	);
 
-	useEffect(() => {
+	React.useEffect(() => {
 		const cachedResources: Resource[] = [];
 
 		if (legalCache && legalCache.length > 0) {
@@ -353,51 +355,22 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 	}, [legalCache, shelterCache, healthcareCache, foodCache]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchNearbyResources changes on every re-render and should not be used as a hook dependency.
-	useEffect(() => {
+	React.useEffect(() => {
 		if (map.current || !mapContainer.current) return;
 
-		map.current = new maplibregl.Map({
+		map.current = new maptilersdk.Map({
 			container: mapContainer.current,
-			attributionControl: false,
-			style: {
-				version: 8,
-				sources: {
-					osm: {
-						type: "raster",
-						tiles: [
-							"https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-							"https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-							"https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-						],
-						tileSize: 256,
-					},
-				},
-				layers: [
-					{
-						id: "background",
-						type: "background",
-						paint: {
-							"background-color": "#1a1a1a",
-						},
-					},
-					{
-						id: "osm-tiles",
-						type: "raster",
-						source: "osm",
-						paint: {
-							"raster-brightness-min": 0,
-							"raster-brightness-max": 0.4,
-							"raster-contrast": 0.4,
-							"raster-saturation": -0.8,
-						},
-					},
-				],
-			},
+			forceNoAttributionControl: true,
+			style:
+				mode === "dark"
+					? maptilersdk.MapStyle.BASIC.DARK
+					: maptilersdk.MapStyle.BASIC.LIGHT,
 			center: [effectiveLocation.longitude, effectiveLocation.latitude],
 			zoom: effectiveLocation.zoom,
+			navigationControl: true,
+			geolocateControl: true,
+			apiKey: process.env.NEXT_PUBLIC_MAPTILER_API_KEY,
 		});
-
-		// Don't create initial user marker here - it will be created by deviceLocation effect
 
 		const initialZoom = map.current.getZoom();
 		fetchNearbyResources(
@@ -438,9 +411,9 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 				map.current = null;
 			}
 		};
-	}, []); // Only initialize once
+	}, []);
 
-	useEffect(() => {
+	React.useEffect(() => {
 		if (!map.current || resources.length === 0) return;
 
 		resources.forEach((resource) => {
@@ -474,7 +447,7 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 			resourceElement.style.cursor = "pointer";
 			resourceElement.innerHTML = resource.icon;
 
-			const popup = new maplibregl.Popup({
+			const popup = new maptilersdk.Popup({
 				offset: 25,
 				closeButton: false,
 			}).setHTML(
@@ -494,18 +467,27 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 				</div>`,
 			);
 
-			new maplibregl.Marker({ element: resourceElement })
+			new maptilersdk.Marker({ element: resourceElement })
 				.setLngLat([resource.lon, resource.lat])
 				.setPopup(popup)
 				.addTo(map.current);
 		});
 	}, [resources]);
 
+	React.useEffect(() => {
+		if (!map.current) return;
+
+		map.current.setStyle(
+			mode === "dark"
+				? maptilersdk.MapStyle.BASIC.DARK
+				: maptilersdk.MapStyle.BASIC.LIGHT,
+		);
+	}, [mode]);
+
 	return (
 		<div className="relative w-full h-full">
 			<div ref={mapContainer} className="w-full h-full" />
 
-			{/* Speed & Verification Status */}
 			<div className="absolute top-4 right-4 bg-black/80 text-white text-xs rounded-lg p-2 max-w-xs">
 				<div className="font-semibold mb-1">⚡ Status</div>
 				{["legal", "shelter", "healthcare", "food"].map((type) => {

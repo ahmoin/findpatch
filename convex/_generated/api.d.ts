@@ -9,9 +9,9 @@
  */
 
 import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
+	ApiFromModules,
+	FilterApi,
+	FunctionReference,
 } from "convex/server";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
@@ -27,16 +27,16 @@ import type * as myFunctions from "../myFunctions.js";
  * ```
  */
 declare const fullApi: ApiFromModules<{
-  auth: typeof auth;
-  crons: typeof crons;
-  http: typeof http;
-  myFunctions: typeof myFunctions;
+	auth: typeof auth;
+	crons: typeof crons;
+	http: typeof http;
+	myFunctions: typeof myFunctions;
 }>;
 export declare const api: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "public">
+	typeof fullApi,
+	FunctionReference<any, "public">
 >;
 export declare const internal: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "internal">
+	typeof fullApi,
+	FunctionReference<any, "internal">
 >;
