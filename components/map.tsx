@@ -436,7 +436,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 					</div>
 					<div style="color: ${resource.color}; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
 						${resource.icon} ${resource.type}
-						${resource.confidence ? `<span style="color: #666; margin-left: 8px;">${Math.round(resource.confidence * 100)}% confidence</span>` : ""}
 					</div>
 					${resource.address ? `<div style="font-size: 11px; color: #666; margin-bottom: 2px;">📍 ${resource.address}</div>` : ""}
 					${resource.osmTags?.phone ? `<div style="font-size: 11px; color: #666; margin-bottom: 2px;">📞 ${resource.osmTags.phone}</div>` : ""}
