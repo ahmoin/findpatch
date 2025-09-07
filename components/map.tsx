@@ -71,7 +71,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 
 	React.useEffect(() => {
 		if (map.current && startingPosition.latitude !== 20) {
-			console.log("Updating map to new location:", startingPosition);
 			map.current.flyTo({
 				center: [startingPosition.longitude, startingPosition.latitude],
 				zoom: 14,
@@ -84,8 +83,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		if (!map.current) return;
 
 		if (deviceLocation) {
-			console.log("Updating device location marker:", deviceLocation);
-
 			if (userLocationMarker.current) {
 				userLocationMarker.current.setLngLat([
 					deviceLocation.longitude,
@@ -182,10 +179,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		try {
 			const cachedData = getCacheForResourceType(resourceType);
 			if (cachedData?.resources) {
-				console.log(
-					`Loaded ${resourceType} from Convex cache instantly (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
-				);
-
 				setCacheStatus((prev) => ({
 					...prev,
 					[resourceType]: {
@@ -197,7 +190,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 				return cachedData.resources;
 			}
 
-			console.log(`No cache for ${resourceType}, fetching fresh data...`);
 			const response = await axios.post("/api/resources", {
 				lat,
 				lon,
@@ -227,9 +219,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 				const maxRetries = 3;
 				if (retryCount < maxRetries) {
 					const delay = 2 ** retryCount * 1000;
-					console.log(
-						`Rate limited for ${resourceType}, retrying in ${delay}ms...`,
-					);
 					await new Promise((resolve) => setTimeout(resolve, delay));
 					return fetchResourceLayer(
 						lat,
@@ -258,19 +247,12 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 			const resourceTypes = ["legal", "shelter", "healthcare", "food"];
 			let allResources: Resource[] = [];
 
-			console.log(
-				`Fetching resources for center: ${lat.toFixed(4)}, ${lon.toFixed(4)} at zoom ${zoom}`,
-			);
-
 			const cachedResources: Resource[] = [];
 			const typesToFetch: string[] = [];
 
 			for (const resourceType of resourceTypes) {
 				const cachedData = getCacheForResourceType(resourceType);
 				if (cachedData?.resources) {
-					console.log(
-						`Using cached ${resourceType} resources (${Math.round(cachedData.cacheAge / 1000 / 60)}min old)`,
-					);
 					cachedResources.push(...cachedData.resources);
 					setCacheStatus((prev) => ({
 						...prev,
@@ -287,7 +269,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 			}
 
 			for (const resourceType of typesToFetch) {
-				console.log(`Loading fresh ${resourceType} resources...`);
 				const layerResources = await fetchResourceLayer(
 					lat,
 					lon,
@@ -347,9 +328,6 @@ export function MapView({ startingPosition, deviceLocation }: MapProps) {
 		}
 
 		if (cachedResources.length > 0) {
-			console.log(
-				`Instantly loaded ${cachedResources.length} cached resources from new system`,
-			);
 			setResources(cachedResources);
 		}
 	}, [legalCache, shelterCache, healthcareCache, foodCache]);
